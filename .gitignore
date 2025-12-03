@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables
+.env
+
+# Export data directory
+data/
+
+# Large data directories (PDFs and generated markdown)
+ce-fortaleza/
+
+# Dataset JSON files (user-specific)
+*.json
+!example*.json
+
+# Test and temporary files
+*.bak
+
+# Lock file (uv manages this)
+uv.lock

@@ -1,0 +1,331 @@
+# PDF to Markdown Converter
+
+A command-line tool to convert legislative PDF documents to Markdown format using Google's Gemini Vision API.
+
+## Features
+
+- **Gemini Vision API**: Direct PDF upload to Gemini 2.0 Flash Lite for extraction
+- **Structured extraction**: Automatically extracts ementa, texto da lei, and justificativa sections
+- **Multithreaded processing**: Configurable worker threads (default: 20, max ~60) for parallel API calls
+- **Portuguese language support**: Optimized for Brazilian Portuguese legislative documents
+- **Metadata preservation**: Extracts metadata from JSON and adds YAML frontmatter to markdown files
+- **Smart skip logic**: Automatically skips already processed files (unless `--force` flag is used)
+- **Testing-friendly**: Process limited number of documents with `--max-documents` flag
+- **Batch processing**: Process entire document collections efficiently
+- **Progress tracking**: Clean progress bar in normal mode, detailed logging in debug mode
+- **Export functionality**: Export all documents with full text to JSON (optionally compressed)
+
+## Installation
+
+This project uses `uv` for package management. First, install uv if you haven't already:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then install the project dependencies:
+
+```bash
+uv sync
+```
+
+## Gemini API Setup
+
+1. **Get a Gemini API key**: Visit [Google AI Studio](https://aistudio.google.com/app/apikey) to obtain your free API key
+
+2. **Create `.env` file**:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Add your API key** to `.env`:
+   ```
+   GEMINI_API_KEY=your_api_key_here
+   ```
+
+4. **Test your setup**:
+   ```bash
+   uv run python test_gemini.py
+   ```
+
+   You should see:
+   ```
+   ✓ python-dotenv is installed
+   ✓ .env file exists
+   ✓ GEMINI_API_KEY is set
+   ✓ Google GenAI client created successfully
+   All checks passed! Ready to use gemini_extract.py
+   ```
+
+## Usage
+
+### Converting PDFs to Markdown
+
+**Basic usage** - Process all documents with 20 workers (default):
+
+```bash
+uv run python gemini_extract.py ce-fortaleza-2024.json
+```
+
+**Testing** - Process first 3 documents with fewer workers:
+
+```bash
+uv run python gemini_extract.py ce-fortaleza-2024.json --max-documents 3 --workers 5
+```
+
+**Adjust parallelism** - Use more/fewer workers:
+
+```bash
+# Conservative (slower, lower API rate)
+uv run python gemini_extract.py ce-fortaleza-2024.json --workers 5
+
+# Default (balanced)
+uv run python gemini_extract.py ce-fortaleza-2024.json --workers 20
+
+# Aggressive (faster, near rate limits)
+uv run python gemini_extract.py ce-fortaleza-2024.json --workers 50
+
+# Maximum safe (for very large batches)
+uv run python gemini_extract.py ce-fortaleza-2024.json --workers 60
+```
+
+**Rate Limits**: Gemini 2.0 Flash Lite allows 4,000 requests/minute and 4M tokens/minute. With our documents, you can safely use up to 50-60 workers before approaching limits.
+
+**Debug mode** - See API call details:
+
+```bash
+uv run python gemini_extract.py ce-fortaleza-2024.json --debug --max-documents 3
+```
+
+**Force reprocessing** - Overwrite existing markdown files:
+
+```bash
+uv run python gemini_extract.py ce-fortaleza-2024.json --force
+```
+
+### Command-Line Options
+
+```
+usage: gemini_extract.py [-h] [--force] [--max-documents N] [--workers N] [--debug] json_file
+
+positional arguments:
+  json_file          JSON file containing document metadata
+
+options:
+  --force            Reprocess documents even if markdown files already exist
+  --max-documents N  Maximum number of documents to process (useful for testing)
+  --workers N        Number of parallel workers for API calls (default: 20, max ~60)
+  --debug            Enable debug mode with detailed logging
+  -h, --help         Show help message and exit
+```
+
+### Progress Display
+
+**Normal mode** (default) shows a clean progress bar:
+```
+Processing 243 documents...
+ 45%|████████████▌              | 110/243 [10:23<12:33, 5.67s/doc, P:85 S:25]
+```
+
+**Debug mode** (`--debug` flag) shows detailed logging with timestamps:
+```
+2025-12-03 14:50:35 - INFO - Processing: Projeto de Lei Ordinária nº 1/2024
+2025-12-03 14:50:35 - INFO -   PDF: ce-fortaleza/pdf/2024/projeto-de-lei-ordinária-1-2024.pdf
+2025-12-03 14:50:45 - INFO -   ✓ Successfully processed
+```
+
+## Input Format
+
+The tool expects a JSON file containing an array of document objects with the following structure:
+
+```json
+[
+  {
+    "title": "Projeto de Lei Ordinária nº 1/2024",
+    "type": "Projeto de Lei Ordinária",
+    "number": "1",
+    "year": "2024",
+    "subject": "Document subject...",
+    "author": ["Author Name"],
+    "presentation_date": "2024-01-02",
+    "url": "https://...",
+    "house": "Câmara Municipal de Fortaleza",
+    "pdf_files": ["ce-fortaleza/pdf/2024/projeto-de-lei-ordinária-1-2024.pdf"]
+  }
+]
+```
+
+**Path Resolution**: 
+- All paths in `pdf_files` are resolved relative to the directory containing the JSON file
+- Markdown output paths are automatically generated by replacing `/pdf/` with `/md/` and `.pdf` with `.md`
+- Example: `ce-fortaleza/pdf/2024/file.pdf` → `ce-fortaleza/md/2024/file.md`
+
+## Output Format
+
+Generated markdown files include YAML frontmatter with metadata and structured content sections:
+
+```markdown
+---
+title: Projeto de Lei Ordinária nº 1/2024
+type: Projeto de Lei Ordinária
+number: 1
+year: 2024
+subject: Document subject...
+author: Author Name
+presentation_date: 2024-01-02
+url: https://...
+house: Câmara Municipal de Fortaleza
+---
+
+# Projeto de Lei Ordinária nº 1/2024
+
+Ementa
+[ementa text extracted by Gemini]
+
+Texto da Lei
+[texto da lei extracted by Gemini]
+
+Justificativa
+[justificativa text extracted by Gemini]
+```
+
+**Note**: Gemini extracts structured sections (ementa, texto, justificativa) which are useful for downstream processing.
+
+## Exporting Data
+
+After converting PDFs to markdown, you can export all documents with their full text content into a single JSON file:
+
+**Basic usage** - Export to `data/` directory (JSON only):
+
+```bash
+uv run python export_json.py ce-fortaleza-2024.json
+```
+
+This creates: `data/ce-fortaleza-2024-export.json`
+
+**Create compressed archive** - Add `--compact` flag to also create a tar.gz:
+
+```bash
+uv run python export_json.py ce-fortaleza-2024.json --compact
+```
+
+This creates both:
+- `data/ce-fortaleza-2024-export.json` (1.2 MB)
+- `data/ce-fortaleza-2024-export.tar.gz` (0.3 MB, ~75% compression)
+
+**Custom output name**:
+
+```bash
+uv run python export_json.py ce-fortaleza-2024.json --output fortaleza-2024 --compact
+```
+
+### Export Format
+
+The exported JSON includes:
+
+```json
+{
+  "items": [
+    {
+      "title": "...",
+      "house": "Câmara Municipal de Fortaleza",
+      "type": "Projeto de Lei Ordinária",
+      "number": 1,
+      "presentation_date": "2024-01-02",
+      "year": 2024,
+      "author": ["Author Name"],
+      "subject": "...",
+      "full_text": "[extracted text without frontmatter]",
+      "length": 3435,
+      "url": "https://...",
+      "scraped_at": "2024-12-18T10:30:00",
+      "metadata": {
+        "pdf_files": ["..."],
+        "file_urls": ["..."],
+        "project_url": "...",
+        "uuid": "...",
+        "status": [...]
+      }
+    }
+  ],
+  "export_info": {
+    "exported_at": "2025-12-03T17:03:00",
+    "total_items": 242,
+    "source_file": "ce-fortaleza-2024.json"
+  }
+}
+```
+
+**Note**: The `full_text` field contains the markdown content without frontmatter and title, ready for text analysis or indexing.
+
+## Performance
+
+**Processing Speed**:
+- ~3-5 seconds per document with API calls
+- With 20 workers (default): ~40-60 documents/minute
+- With 60 workers (maximum): ~100-120 documents/minute
+- Full dataset (243 documents): ~2-6 minutes total
+
+**Cost** (Gemini 2.0 Flash Lite):
+- Input: $0.0001875 per 1K tokens (~$0.004 per document)
+- Output: $0.0007500 per 1K tokens (~$0.015 per document)
+- **Total for 243 documents**: ~$0.05-0.10
+
+**API Rate Limits**: 4,000 requests/minute and 4M tokens/minute
+
+## Troubleshooting
+
+**API Key Issues**
+
+```bash
+# Verify setup
+uv run python test_gemini.py
+
+# Check .env file exists and has correct format
+cat .env
+# Should show: GEMINI_API_KEY=your_key_here
+```
+
+**Rate Limiting**
+
+If you hit rate limits (unlikely with our documents), reduce workers:
+
+```bash
+# Use fewer parallel workers
+uv run python gemini_extract.py ce-fortaleza-2024.json --workers 10
+```
+
+**Note**: For 243 documents, even 60 workers (~60 req/min) is well below the 4,000 req/min limit.
+
+**API Errors**
+
+- Check your API key is valid at [Google AI Studio](https://aistudio.google.com/app/apikey)
+- Ensure you have internet connectivity
+- Check Gemini API status at [Google Cloud Status](https://status.cloud.google.com/)
+- Try with `--debug` flag to see detailed error messages
+
+**Incomplete Extractions**
+
+- Gemini may not always find all sections (ementa/texto/justificativa)
+- This is normal for documents with non-standard structure
+- The tool extracts whatever text Gemini returns
+
+## Legacy Local OCR Implementation
+
+The original local OCR implementation (using doctr and PyMuPDF) has been moved to the `legacy/` directory. See `legacy/README.md` for details.
+
+**Why the change?**
+- Simpler setup (no 3GB+ PyTorch dependency)
+- Better structured output
+- Easier to maintain
+- Cloud-based processing
+
+If you need offline/local processing, the legacy implementation is still available.
+
+## Development
+
+For information about architectural decisions and implementation details, see [AGENTS.md](AGENTS.md).
+
+## License
+
+[Add your license here]
