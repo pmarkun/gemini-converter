@@ -97,6 +97,7 @@ def extract_text_with_gemini(pdf_path: Path, client: genai.Client, debug: bool =
                     text="""Extraia a integra do texto e a justificativa no formato:
 Texto da Lei
 [texto da Lei]
+
 Justificativa
 [justificativa]"""
                 ),
