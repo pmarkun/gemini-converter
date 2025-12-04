@@ -94,12 +94,25 @@ def extract_text_with_gemini(pdf_path: Path, client: genai.Client, debug: bool =
                     mime_type="application/pdf"
                 ),
                 types.Part.from_text(
-                    text="""Extraia a integra do texto e a justificativa no formato:
-Texto da Lei
-[texto da Lei]
+                    text="""Extraia o texto completo do documento legislativo mantendo sua estrutura original.
 
-Justificativa
-[justificativa]"""
+Organize a saída no seguinte formato markdown:
+
+## Ementa
+[Texto da ementa, se houver]
+
+## Texto da Lei
+[Texto integral da lei com todos os artigos, incisos, parágrafos, etc.]
+
+## Justificativa
+[Texto da justificativa]
+
+Regras importantes:
+- Mantenha toda a numeração de artigos, incisos, parágrafos e alíneas
+- Preserve a formatação hierárquica (use indentação quando apropriado)
+- Se alguma seção não existir no documento, omita-a
+- Não adicione comentários ou explicações, apenas extraia o texto
+- Use ## para títulos de seção em markdown"""
                 ),
             ],
         ),
