@@ -160,6 +160,21 @@ def load_json(json_path: Path, debug: bool = False) -> list[dict]:
         sys.exit(1)
 
 
+def generate_pdf_path_from_metadata(doc: dict) -> str:
+    """
+    Generate PDF path from document metadata for alternative format.
+    
+    Example:
+        type: "PL", number: 7, year: 2020
+        -> "pdf/pl-7-2020.pdf"
+    """
+    doc_type = doc.get("type", "").lower()
+    doc_number = doc.get("number", "")
+    doc_year = doc.get("year", "")
+    
+    return f"pdf/{doc_type}-{doc_number}-{doc_year}.pdf"
+
+
 def pdf_path_to_md_path(pdf_path: str) -> str:
     """
     Convert PDF path to markdown path by replacing /pdf/ with /md/ and .pdf with .md
@@ -174,19 +189,24 @@ def pdf_path_to_md_path(pdf_path: str) -> str:
     return md_path
 
 
-def should_process_document(doc: dict, force: bool, base_path: Path) -> tuple[bool, Optional[str]]:
+def should_process_document(doc: dict, force: bool, base_path: Path, alt_format: bool = False) -> tuple[bool, Optional[str]]:
     """
     Determine if a document should be processed.
 
     Returns:
         Tuple of (should_process, reason)
     """
-    # Check if document has required fields
-    if not doc.get("pdf_files"):
-        return False, "No PDF files specified"
+    # Get PDF path based on format
+    if alt_format:
+        # Alternative format: generate PDF path from metadata
+        pdf_relative = generate_pdf_path_from_metadata(doc)
+    else:
+        # Original format: use pdf_files field
+        if not doc.get("pdf_files"):
+            return False, "No PDF files specified"
+        pdf_relative = doc["pdf_files"][0]
 
     # Generate markdown path from PDF path
-    pdf_relative = doc["pdf_files"][0]
     md_relative = pdf_path_to_md_path(pdf_relative)
     md_path = base_path / md_relative
 
@@ -281,7 +301,7 @@ def show_text_preview(text: str, max_chars: int = 300):
     logger.info(f"    Preview: {preview}")
 
 
-def process_document(doc: dict, base_path: Path, client: genai.Client, debug: bool = False) -> tuple[bool, str]:
+def process_document(doc: dict, base_path: Path, client: genai.Client, debug: bool = False, alt_format: bool = False) -> tuple[bool, str]:
     """
     Process a single document: extract text with Gemini and save as markdown.
 
@@ -289,8 +309,14 @@ def process_document(doc: dict, base_path: Path, client: genai.Client, debug: bo
         Tuple of (success, error_message)
     """
     try:
-        # Get PDF path (use first PDF if multiple)
-        pdf_relative = doc["pdf_files"][0]
+        # Get PDF path based on format
+        if alt_format:
+            # Alternative format: generate PDF path from metadata
+            pdf_relative = generate_pdf_path_from_metadata(doc)
+        else:
+            # Original format: use pdf_files field
+            pdf_relative = doc["pdf_files"][0]
+        
         pdf_path = base_path / pdf_relative
 
         # Generate markdown output path from PDF path
@@ -348,20 +374,20 @@ def process_document_wrapper(args):
     Wrapper function for multithread processing.
 
     Args:
-        args: Tuple of (doc, base_path, client, doc_index, debug)
+        args: Tuple of (doc, base_path, client, doc_index, debug, alt_format)
 
     Returns:
         Tuple of (doc_index, success, error_message, doc_title)
     """
-    doc, base_path, client, doc_index, debug = args
+    doc, base_path, client, doc_index, debug, alt_format = args
 
-    success, error_msg = process_document(doc, base_path, client, debug=debug)
+    success, error_msg = process_document(doc, base_path, client, debug=debug, alt_format=alt_format)
     title = doc.get("title", "Unknown")
 
     return (doc_index, success, error_msg, title)
 
 
-def process_json_file(json_file: Path, client: genai.Client, force: bool, max_documents: Optional[int], workers: int, debug: bool) -> tuple[int, int, int, int]:
+def process_json_file(json_file: Path, client: genai.Client, force: bool, max_documents: Optional[int], workers: int, debug: bool, alt_format: bool = False) -> tuple[int, int, int, int]:
     """
     Process a single JSON file.
 
@@ -385,7 +411,7 @@ def process_json_file(json_file: Path, client: genai.Client, force: bool, max_do
     skipped = 0
 
     for doc in documents:
-        should_process, reason = should_process_document(doc, force, base_path)
+        should_process, reason = should_process_document(doc, force, base_path, alt_format=alt_format)
         if should_process:
             docs_to_process.append(doc)
         else:
@@ -408,6 +434,8 @@ def process_json_file(json_file: Path, client: genai.Client, force: bool, max_do
         print(f"\n{'='*60}")
         print(f"Processing {json_file.name} with Gemini Vision API ({to_process} documents)")
         print(f"Workers: {workers}")
+        if alt_format:
+            print("Format: Alternative (auto-generated PDF paths)")
         print('='*60 + '\n')
 
         # Debug mode: detailed logging (still parallel but with logs)
@@ -417,7 +445,7 @@ def process_json_file(json_file: Path, client: genai.Client, force: bool, max_do
             for i, doc in enumerate(docs_to_process):
                 future = executor.submit(
                     process_document_wrapper,
-                    (doc, base_path, client, i, True)
+                    (doc, base_path, client, i, True, alt_format)
                 )
                 future_to_doc[future] = doc
 
@@ -438,7 +466,8 @@ def process_json_file(json_file: Path, client: genai.Client, force: bool, max_do
                 logger.info("")
     else:
         # Normal mode: progress bar with parallel processing
-        print(f"\nProcessing {json_file.name} with Gemini Vision API ({to_process} documents, {workers} workers)...")
+        format_msg = " (alt format)" if alt_format else ""
+        print(f"\nProcessing {json_file.name}{format_msg} with Gemini Vision API ({to_process} documents, {workers} workers)...")
 
         with tqdm(total=to_process, unit="doc", ncols=80, desc=json_file.stem) as pbar:
             with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -447,7 +476,7 @@ def process_json_file(json_file: Path, client: genai.Client, force: bool, max_do
                 for i, doc in enumerate(docs_to_process):
                     future = executor.submit(
                         process_document_wrapper,
-                        (doc, base_path, client, i, False)
+                        (doc, base_path, client, i, False, alt_format)
                     )
                     future_to_doc[future] = doc
 
@@ -509,6 +538,9 @@ Examples:
 
   # Use more parallel workers for faster processing
   python gemini_extract.py ce-fortaleza-2024.json --workers 40
+  
+  # Use alternative JSON format (auto-generate PDF paths)
+  python gemini_extract.py sp-sao-paulo.json --alt
 
 Environment:
   Create a .env file with: GEMINI_API_KEY=your-key-here
@@ -554,6 +586,12 @@ Environment:
         "--debug",
         action="store_true",
         help="Enable debug mode with detailed logging"
+    )
+    
+    parser.add_argument(
+        "--alt",
+        action="store_true",
+        help="Use alternative JSON format (auto-generate PDF paths from metadata)"
     )
 
     args = parser.parse_args()
@@ -609,7 +647,7 @@ Environment:
 
     for json_file in json_files:
         total, processed, skipped, failed = process_json_file(
-            json_file, client, args.force, args.max_documents, args.workers, args.debug
+            json_file, client, args.force, args.max_documents, args.workers, args.debug, alt_format=args.alt
         )
         overall_stats["total"] += total
         overall_stats["processed"] += processed

@@ -61,16 +61,28 @@ uv sync
 
 ### Converting PDFs to Markdown
 
-**Basic usage** - Process all documents with 20 workers (default):
+**Basic usage** - Process a single JSON file with 20 workers (default):
 
 ```bash
 uv run python gemini_extract.py ce-fortaleza-2024.json
 ```
 
-**Testing** - Process first 3 documents with fewer workers:
+**Process multiple files** - Process all JSON files in a directory:
 
 ```bash
-uv run python gemini_extract.py ce-fortaleza-2024.json --max-documents 3 --workers 5
+uv run python gemini_extract.py --folder data/
+```
+
+This will:
+- Discover all `.json` files in the specified directory
+- Process them sequentially with the same configuration
+- Show individual progress for each file
+- Display an overall summary at the end
+
+**Testing** - Process first 3 documents per file with fewer workers:
+
+```bash
+uv run python gemini_extract.py --folder data/ --max-documents 3 --workers 5
 ```
 
 **Adjust parallelism** - Use more/fewer workers:
@@ -106,18 +118,21 @@ uv run python gemini_extract.py ce-fortaleza-2024.json --force
 ### Command-Line Options
 
 ```
-usage: gemini_extract.py [-h] [--force] [--max-documents N] [--workers N] [--debug] json_file
+usage: gemini_extract.py [-h] [--folder FOLDER] [--force] [--max-documents N] [--workers N] [--debug] [json_file]
 
 positional arguments:
   json_file          JSON file containing document metadata
 
 options:
+  --folder FOLDER    Folder containing JSON files to process
   --force            Reprocess documents even if markdown files already exist
-  --max-documents N  Maximum number of documents to process (useful for testing)
+  --max-documents N  Maximum number of documents to process per file (useful for testing)
   --workers N        Number of parallel workers for API calls (default: 20, max ~60)
   --debug            Enable debug mode with detailed logging
   -h, --help         Show help message and exit
 ```
+
+**Note**: `json_file` and `--folder` are mutually exclusive. Use one or the other, not both.
 
 ### Progress Display
 

@@ -372,6 +372,42 @@ python export_json.py input.json --compact
 - All output files saved to `data/` directory
 - Auto-creates `data/` directory if it doesn't exist
 
+### 15. Batch Processing with --folder
+
+**Decision**: Add `--folder` parameter to `gemini_extract.py` to process multiple JSON files in a directory.
+
+**Rationale**:
+- **Convenience**: Process entire directories without shell scripting
+- **Consistency**: Same configuration applied to all files (workers, force, max-documents)
+- **Statistics**: Overall summary across all processed files
+- **Progress tracking**: Shows which file is being processed
+
+**Implementation**:
+```python
+# Process single file
+python gemini_extract.py ce-fortaleza-2024.json
+
+# Process all JSON files in a folder
+python gemini_extract.py --folder data/
+
+# Process folder with options
+python gemini_extract.py --folder data/ --force --workers 40
+```
+
+**Features**:
+- Mutually exclusive with `json_file` argument (either one file or folder)
+- Sorts files alphabetically for predictable processing order
+- Shows list of discovered JSON files before processing
+- Individual progress bar and summary for each file
+- Overall summary at the end with totals across all files
+- Non-zero exit code if any file has failures
+
+**Benefits**:
+- Simplifies batch processing workflows
+- No need for external shell loops
+- Consistent error handling across multiple files
+- Clear progress indication for large batches
+
 ## Development Timeline
 
 - **Session 1**: Project initialization, dependency setup, architecture planning
@@ -381,13 +417,7 @@ python export_json.py input.json --compact
 - **Session 5**: Gemini Vision API integration with multithreading support
 - **Session 6**: Rate limit optimization (20-60 workers), auto-generated markdown paths, export script implementation
 - **Session 7**: Export script refinement (data/ directory, --compact flag)
-
-- **Session 1**: Project initialization, dependency setup, architecture planning
-- **Session 2**: Implementation of converter module and CLI, documentation
-- **Session 3**: GPU acceleration experiments, parallel processing attempts
-- **Session 4**: Smart extraction strategy implementation (direct + OCR fallback)
-- **Session 5**: Gemini Vision API integration with multithreading support
-- **Session 6**: Rate limit optimization (20-60 workers), auto-generated markdown paths
+- **Session 8**: Batch processing support (--folder parameter) for gemini_extract.py
 
 ## References
 
