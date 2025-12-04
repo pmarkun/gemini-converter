@@ -5,6 +5,7 @@ and generate Markdown files from PDFs using Gemini Vision API.
 
 Usage:
     python gemini_extract.py <json_file> [--force] [--max-documents N] [--debug] [--workers N]
+    python gemini_extract.py --folder <directory> [--force] [--max-documents N] [--debug] [--workers N]
     
 Environment:
     .env file with GEMINI_API_KEY variable
@@ -361,6 +362,130 @@ def process_document_wrapper(args):
     return (doc_index, success, error_msg, title)
 
 
+def process_json_file(json_file: Path, client: genai.Client, force: bool, max_documents: Optional[int], workers: int, debug: bool) -> tuple[int, int, int, int]:
+    """
+    Process a single JSON file.
+    
+    Returns:
+        Tuple of (total, processed, skipped, failed)
+    """
+    # Get base path (directory containing the JSON file)
+    base_path = json_file.parent
+    
+    # Load documents from JSON
+    documents = load_json(json_file, debug=debug)
+    
+    # Apply max-documents limit if specified
+    if max_documents:
+        documents = documents[:max_documents]
+        if debug:
+            logger.info(f"Limited to processing {len(documents)} documents")
+    
+    # Filter documents that need processing
+    docs_to_process = []
+    skipped = 0
+    
+    for doc in documents:
+        should_process, reason = should_process_document(doc, force, base_path)
+        if should_process:
+            docs_to_process.append(doc)
+        else:
+            skipped += 1
+            if debug:
+                logger.info(f"Skipping {doc.get('title', 'Unknown')}: {reason}")
+    
+    total = len(documents)
+    to_process = len(docs_to_process)
+    
+    if to_process == 0:
+        return (total, 0, skipped, 0)
+    
+    # Process documents with multithread
+    processed = 0
+    failed = 0
+    failed_docs = []
+    
+    if debug:
+        print(f"\n{'='*60}")
+        print(f"Processing {json_file.name} with Gemini Vision API ({to_process} documents)")
+        print(f"Workers: {workers}")
+        print('='*60 + '\n')
+        
+        # Debug mode: detailed logging (still parallel but with logs)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            # Submit all tasks
+            future_to_doc = {}
+            for i, doc in enumerate(docs_to_process):
+                future = executor.submit(
+                    process_document_wrapper,
+                    (doc, base_path, client, i, True)
+                )
+                future_to_doc[future] = doc
+            
+            # Process results as they complete
+            for future in as_completed(future_to_doc):
+                doc_index, success, error_msg, title = future.result()
+                
+                logger.info(f"[{doc_index + 1}/{to_process}] {title}")
+                
+                if success:
+                    processed += 1
+                    logger.info("    ✓ Success")
+                else:
+                    failed += 1
+                    failed_docs.append((title, error_msg))
+                    logger.error(f"    ✗ Failed: {error_msg}")
+                
+                logger.info("")
+    else:
+        # Normal mode: progress bar with parallel processing
+        print(f"\nProcessing {json_file.name} with Gemini Vision API ({to_process} documents, {workers} workers)...")
+        
+        with tqdm(total=to_process, unit="doc", ncols=80, desc=json_file.stem) as pbar:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                # Submit all tasks
+                future_to_doc = {}
+                for i, doc in enumerate(docs_to_process):
+                    future = executor.submit(
+                        process_document_wrapper,
+                        (doc, base_path, client, i, False)
+                    )
+                    future_to_doc[future] = doc
+                
+                # Process results as they complete
+                for future in as_completed(future_to_doc):
+                    doc_index, success, error_msg, title = future.result()
+                    
+                    if success:
+                        processed += 1
+                        pbar.set_postfix_str(f"OK:{processed} Fail:{failed}")
+                    else:
+                        failed += 1
+                        failed_docs.append((title, error_msg))
+                        pbar.set_postfix_str(f"OK:{processed} Fail:{failed}")
+                    
+                    pbar.update(1)
+    
+    # Print summary for this file
+    print("\n" + "=" * 60)
+    print(f"Processing complete: {json_file.name}")
+    print(f"  Total documents: {total}")
+    print(f"  Processed:       {processed}")
+    print(f"  Skipped:         {skipped}")
+    print(f"  Failed:          {failed}")
+    print("=" * 60)
+    
+    # Print failed documents if any
+    if failed_docs:
+        print("\nFailed documents:")
+        for title, error in failed_docs:
+            print(f"  - {title}")
+            if debug:
+                print(f"    Error: {error}")
+    
+    return (total, processed, skipped, failed)
+
+
 def main():
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(
@@ -368,14 +493,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Process all documents in the JSON file
+  # Process all documents in a single JSON file
   python gemini_extract.py ce-fortaleza-2024.json
+  
+  # Process all JSON files in a directory
+  python gemini_extract.py --folder data/
   
   # Process with force flag to overwrite existing markdown files
   python gemini_extract.py ce-fortaleza-2024.json --force
   
-  # Process only the first 5 documents (for testing)
-  python gemini_extract.py ce-fortaleza-2024.json --max-documents 5
+  # Process only the first 5 documents per file (for testing)
+  python gemini_extract.py --folder data/ --max-documents 5
   
   # Enable debug mode for detailed logging
   python gemini_extract.py ce-fortaleza-2024.json --debug
@@ -388,10 +516,18 @@ Environment:
         """
     )
     
-    parser.add_argument(
+    # Create mutually exclusive group for json_file and folder
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument(
         "json_file",
         type=Path,
+        nargs="?",
         help="JSON file containing document metadata"
+    )
+    input_group.add_argument(
+        "--folder",
+        type=Path,
+        help="Folder containing JSON files to process"
     )
     
     parser.add_argument(
@@ -404,7 +540,7 @@ Environment:
         "--max-documents",
         type=int,
         metavar="N",
-        help="Maximum number of documents to process (useful for testing)"
+        help="Maximum number of documents to process per file (useful for testing)"
     )
     
     parser.add_argument(
@@ -434,135 +570,66 @@ Environment:
         # In non-debug mode, suppress most logging
         logging.basicConfig(level=logging.WARNING)
     
-    # Validate JSON file exists
-    if not args.json_file.exists():
-        print(f"Error: JSON file not found: {args.json_file}", file=sys.stderr)
-        sys.exit(1)
+    # Get list of JSON files to process
+    json_files = []
+    
+    if args.folder:
+        # Process all JSON files in the folder
+        if not args.folder.exists():
+            print(f"Error: Folder not found: {args.folder}", file=sys.stderr)
+            sys.exit(1)
+        if not args.folder.is_dir():
+            print(f"Error: Not a directory: {args.folder}", file=sys.stderr)
+            sys.exit(1)
+        
+        json_files = sorted(args.folder.glob("*.json"))
+        if not json_files:
+            print(f"Error: No JSON files found in {args.folder}", file=sys.stderr)
+            sys.exit(1)
+        
+        print(f"\nFound {len(json_files)} JSON files in {args.folder}")
+        for jf in json_files:
+            print(f"  - {jf.name}")
+    else:
+        # Process single JSON file
+        if not args.json_file.exists():
+            print(f"Error: JSON file not found: {args.json_file}", file=sys.stderr)
+            sys.exit(1)
+        json_files = [args.json_file]
     
     # Initialize Gemini client
     client = get_gemini_client()
     
-    # Get base path (directory containing the JSON file)
-    base_path = args.json_file.parent
+    # Process all JSON files
+    overall_stats = {
+        "total": 0,
+        "processed": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
     
-    # Load documents from JSON
-    documents = load_json(args.json_file, debug=args.debug)
+    for json_file in json_files:
+        total, processed, skipped, failed = process_json_file(
+            json_file, client, args.force, args.max_documents, args.workers, args.debug
+        )
+        overall_stats["total"] += total
+        overall_stats["processed"] += processed
+        overall_stats["skipped"] += skipped
+        overall_stats["failed"] += failed
     
-    # Apply max-documents limit if specified
-    if args.max_documents:
-        documents = documents[:args.max_documents]
-        if args.debug:
-            logger.info(f"Limited to processing {len(documents)} documents")
-    
-    # Filter documents that need processing
-    docs_to_process = []
-    skipped = 0
-    
-    for doc in documents:
-        should_process, reason = should_process_document(doc, args.force, base_path)
-        if should_process:
-            docs_to_process.append(doc)
-        else:
-            skipped += 1
-            if args.debug:
-                logger.info(f"Skipping {doc.get('title', 'Unknown')}: {reason}")
-    
-    total = len(documents)
-    to_process = len(docs_to_process)
-    
-    if to_process == 0:
-        print(f"\n{'='*60}")
-        print("No documents to process!")
-        print(f"  Total documents: {total}")
-        print(f"  Skipped:         {skipped}")
-        print('='*60)
-        return
-    
-    # Process documents with multithread
-    processed = 0
-    failed = 0
-    failed_docs = []
-    
-    if args.debug:
-        print(f"\n{'='*60}")
-        print(f"Processing with Gemini Vision API ({to_process} documents)")
-        print(f"Workers: {args.workers}")
-        print('='*60 + '\n')
-        
-        # Debug mode: detailed logging (still parallel but with logs)
-        with ThreadPoolExecutor(max_workers=args.workers) as executor:
-            # Submit all tasks
-            future_to_doc = {}
-            for i, doc in enumerate(docs_to_process):
-                future = executor.submit(
-                    process_document_wrapper,
-                    (doc, base_path, client, i, True)
-                )
-                future_to_doc[future] = doc
-            
-            # Process results as they complete
-            for future in as_completed(future_to_doc):
-                doc_index, success, error_msg, title = future.result()
-                
-                logger.info(f"[{doc_index + 1}/{to_process}] {title}")
-                
-                if success:
-                    processed += 1
-                    logger.info("    ✓ Success")
-                else:
-                    failed += 1
-                    failed_docs.append((title, error_msg))
-                    logger.error(f"    ✗ Failed: {error_msg}")
-                
-                logger.info("")
-    else:
-        # Normal mode: progress bar with parallel processing
-        print(f"\nProcessing with Gemini Vision API ({to_process} documents, {args.workers} workers)...")
-        
-        with tqdm(total=to_process, unit="doc", ncols=80, desc="Gemini") as pbar:
-            with ThreadPoolExecutor(max_workers=args.workers) as executor:
-                # Submit all tasks
-                future_to_doc = {}
-                for i, doc in enumerate(docs_to_process):
-                    future = executor.submit(
-                        process_document_wrapper,
-                        (doc, base_path, client, i, False)
-                    )
-                    future_to_doc[future] = doc
-                
-                # Process results as they complete
-                for future in as_completed(future_to_doc):
-                    doc_index, success, error_msg, title = future.result()
-                    
-                    if success:
-                        processed += 1
-                        pbar.set_postfix_str(f"OK:{processed} Fail:{failed}")
-                    else:
-                        failed += 1
-                        failed_docs.append((title, error_msg))
-                        pbar.set_postfix_str(f"OK:{processed} Fail:{failed}")
-                    
-                    pbar.update(1)
-    
-    # Print summary
-    print("\n" + "=" * 60)
-    print("Processing complete!")
-    print(f"  Total documents: {total}")
-    print(f"  Processed:       {processed}")
-    print(f"  Skipped:         {skipped}")
-    print(f"  Failed:          {failed}")
-    print("=" * 60)
-    
-    # Print failed documents if any
-    if failed_docs:
-        print("\nFailed documents:")
-        for title, error in failed_docs:
-            print(f"  - {title}")
-            if args.debug:
-                print(f"    Error: {error}")
+    # Print overall summary if processing multiple files
+    if len(json_files) > 1:
+        print("\n" + "=" * 60)
+        print("OVERALL SUMMARY")
+        print(f"  Files processed: {len(json_files)}")
+        print(f"  Total documents: {overall_stats['total']}")
+        print(f"  Processed:       {overall_stats['processed']}")
+        print(f"  Skipped:         {overall_stats['skipped']}")
+        print(f"  Failed:          {overall_stats['failed']}")
+        print("=" * 60)
     
     # Exit with error code if any failed
-    if failed > 0:
+    if overall_stats["failed"] > 0:
         sys.exit(1)
 
 
