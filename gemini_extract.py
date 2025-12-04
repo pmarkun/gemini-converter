@@ -506,10 +506,18 @@ def process_json_file(json_file: Path, client: genai.Client, force: bool, max_do
     # Print failed documents if any
     if failed_docs:
         print("\nFailed documents:")
-        for title, error in failed_docs:
-            print(f"  - {title}")
-            if debug:
+        # Show first 3 errors with details (even without debug)
+        for i, (title, error) in enumerate(failed_docs):
+            if i < 3 or debug:
+                print(f"  - {title}")
                 print(f"    Error: {error}")
+            else:
+                print(f"  - {title}")
+        
+        # Show summary if there are many failures
+        if len(failed_docs) > 3 and not debug:
+            print(f"\n  ... and {len(failed_docs) - 3} more failures")
+            print("  (Use --debug to see all error details)")
 
     return (total, processed, skipped, failed)
 
