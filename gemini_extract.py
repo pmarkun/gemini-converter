@@ -94,26 +94,29 @@ def extract_text_with_gemini(pdf_path: Path, client: genai.Client, debug: bool =
                     mime_type="application/pdf"
                 ),
                 types.Part.from_text(
-                    text="""Extraia o texto completo do documento legislativo mantendo sua estrutura original.
-
-Organize a saída no seguinte formato markdown:
-
-## Ementa
-[Texto da ementa, se houver]
-
-## Texto da Lei
-[Texto integral da lei com todos os artigos, incisos, parágrafos, etc.]
-
-## Justificativa
-[Texto da justificativa]
-
-Regras importantes:
-- Mantenha toda a numeração de artigos, incisos, parágrafos e alíneas
-- Preserve a formatação hierárquica (use indentação quando apropriado)
-- Se alguma seção não existir no documento, omita-a
-- Não adicione comentários ou explicações, apenas extraia o texto
-- Use ## para títulos de seção em markdown"""
-                ),
+                    text=
+                    
+"""Extraia o texto do documento legislativo mantendo a fidelidade total ao conteúdo original do PDF.
+Formato de Saída (Markdown):
+A saída deve conter apenas as seções abaixo que forem encontradas no documento. Se uma seção não existir, não inclua o seu título (##) nem qualquer comentário sobre ela.
+Ementa
+(Insira aqui a ementa, se houver)
+Texto da Lei
+(Insira aqui o texto integral: artigos, incisos, parágrafos, etc.)
+Justificativa
+(Insira aqui a justificativa, se houver)
+Regras Cruciais de Execução:
+Remova cabeçalhos, rodapés e artefatos gráficos que não façam parte do corpo normativo do texto.
+Se o mesmo parágrafo aparecer repetido consecutivamente por erro de leitura do PDF, mantenha apenas uma ocorrência.
+OMISSÃO TOTAL: Se a "Ementa" ou a "Justificativa" não estiverem presentes, pule o título correspondente. É terminantemente proibido escrever notas como (Insira aqui a ementa, se houver) ou "[Não há ementa]" ou "[Seção ausente]".
+SEM CONTEÚDO ADICIONAL: Não adicione introduções (ex: "Aqui está o texto"), conclusões, explicações ou desculpas (ex: "Sinto muito, não consegui ler"). A saída deve ser exclusivamente o texto bruto extraído.
+FIDELIDADE: Mantenha rigorosamente toda a numeração de artigos, incisos, parágrafos e alíneas. Preserve a hierarquia e indentação original.
+MÁXIMA PRECISÃO: Extraia o texto na íntegra, o mais próximo possível do PDF, sem inventar, resumir ou adicionar caracteres que não existam no original.
+MARKDOWN: Use apenas ## para títulos de seção.
+SAÍDA PURA: Sua resposta deve conter APENAS o texto extraído do documento.
+PROIBIÇÃO DE COMENTÁRIOS: É terminantemente proibido usar parênteses (), colchetes [] ou frases explicativas para justificar a ausência de conteúdo.
+SILÊNCIO SOBRE FALHAS: Se você não encontrar a Ementa ou a Justificativa, simplesmente não escreva nada sobre elas. Pule para a próxima seção encontrada.
+"""  ),
             ],
         ),
     ]
