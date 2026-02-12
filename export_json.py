@@ -15,18 +15,24 @@ from datetime import datetime
 from typing import Optional
 
 
-def pdf_path_to_md_path(pdf_path: str) -> str:
+def file_path_to_md_path(file_path: str) -> str:
     """
-    Convert PDF path to markdown path by replacing /pdf/ with /md/ and .pdf with .md
+    Convert source file path (pdf/doc/docx/bin) to markdown path
+    by replacing /pdf/ with /md/ and changing extension to .md
     
-    Example:
-        "ce-fortaleza/pdf/2024/projeto-de-lei-ordinária-255-2024.pdf"
-        -> "ce-fortaleza/md/2024/projeto-de-lei-ordinária-255-2024.md"
+    Handles .pdf, .docx, .doc, .bin
     """
-    md_path = pdf_path.replace("/pdf/", "/md/")
+    md_path = file_path.replace("/pdf/", "/md/")
     if md_path.endswith(".pdf"):
         md_path = md_path[:-4] + ".md"
+    elif md_path.endswith(".docx"):
+        md_path = md_path[:-5] + ".md"
+    elif md_path.endswith(".doc"):
+        md_path = md_path[:-4] + ".md"
+    elif md_path.endswith(".bin"):
+        md_path = md_path[:-4] + ".md"
     return md_path
+
 
 
 def read_markdown_file(md_path: Path) -> Optional[str]:
@@ -83,6 +89,27 @@ def extract_full_text_from_markdown(markdown_content: str) -> str:
     full_text = '\n'.join(lines[content_start:]).strip()
     return full_text
 
+def normalize_authors(author_field):
+    if not author_field:
+        return []
+
+    if isinstance(author_field, list):
+        out = []
+        for a in author_field:
+            if isinstance(a, dict) and "nome" in a:
+                out.append(a["nome"].strip())
+            elif isinstance(a, str):
+                out.append(a.strip())
+        return out
+
+    if isinstance(author_field, dict) and "nome" in author_field:
+        return [author_field["nome"].strip()]
+
+    if isinstance(author_field, str):
+        return [author_field.strip()]
+
+    return []
+
 
 def convert_document(doc: dict, base_path: Path) -> Optional[dict]:
     """
@@ -96,12 +123,23 @@ def convert_document(doc: dict, base_path: Path) -> Optional[dict]:
         Converted document dictionary or None if markdown not found
     """
     # Get markdown path
-    if not doc.get("pdf_files"):
-        print(f"Warning: Document '{doc.get('title', 'Unknown')}' has no pdf_files", file=sys.stderr)
+    pdf_relative = None
+
+    if doc.get("pdf_files"):
+        pdf_relative = doc["pdf_files"][0]
+    elif doc.get("file_urls"):
+        pdf_relative = doc["file_urls"][0]
+        # mantém os dois campos iguais
+        doc["pdf_files"] = [pdf_relative]
+
+    if not pdf_relative:
+        print(
+            f"Warning: Document '{doc.get('title', 'Unknown')}' has no pdf_files or file_urls",
+            file=sys.stderr
+        )
         return None
-    
-    pdf_relative = doc["pdf_files"][0]
-    md_relative = pdf_path_to_md_path(pdf_relative)
+
+    md_relative = file_path_to_md_path(pdf_relative)
     md_path = base_path / md_relative
     
     # Read markdown content
@@ -121,7 +159,7 @@ def convert_document(doc: dict, base_path: Path) -> Optional[dict]:
         "number": int(doc.get("number", 0)) if doc.get("number") else 0,
         "presentation_date": doc.get("presentation_date", ""),
         "year": int(doc.get("year", 0)) if doc.get("year") else 0,
-        "author": doc.get("author", []) if isinstance(doc.get("author"), list) else [doc.get("author", "")],
+        "author": normalize_authors(doc.get("author")),
         "subject": doc.get("subject", ""),
         "full_text": full_text,
         "length": len(full_text),
